@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="de"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Schiefer Wurf – Simulation</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#1b2330;--mu:#5b6678;--ac:#2563eb;--bd:#d9dee7;--sky:#e8f1fb;--gr:#8fbf7a;--ok:#16a34a;--bad:#dc2626;--ball:#e11d48;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#12161d;--card:#1b222d;--tx:#e8ecf2;--mu:#93a0b4;--ac:#6d9bff;--bd:#323c4b;--sky:#1d2b3d;--gr:#3f6b36;--ok:#4ade80;--bad:#f87171;--ball:#fb7185;color-scheme:dark}}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.45 system-ui,Segoe UI,Arial,sans-serif;padding:12px}
+.w{max-width:980px;margin:0 auto}h1{font-size:1.3rem;margin:4px 0 10px}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.tabs button{flex:1;min-width:140px;padding:10px;border:1px solid var(--bd);background:var(--card);color:var(--tx);border-radius:8px;font:inherit;cursor:pointer}
+.tabs button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:12px;margin-bottom:10px}
+canvas{width:100%;display:block;border-radius:8px;border:1px solid var(--bd);background:var(--sky)}
+.ctl{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px 18px}
+.ctl label{display:block;font-size:.9rem;color:var(--mu)}.ctl b{color:var(--tx)}
+input[type=range]{width:100%}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
+.btn{padding:9px 16px;border:0;border-radius:8px;background:var(--ac);color:#fff;font:inherit;cursor:pointer}
+.btn.s{background:transparent;color:var(--tx);border:1px solid var(--bd)}
+.msg{min-height:1.5em;font-weight:600}.ok{color:var(--ok)}.bad{color:var(--bad)}.mu{color:var(--mu);font-size:.9rem}
+.dg{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}.dg canvas{background:var(--card)}
+table{border-collapse:collapse;width:100%;font-size:.9rem}td,th{border-bottom:1px solid var(--bd);padding:4px 8px;text-align:right}
+.tw{max-height:180px;overflow:auto}.score{font-size:1.1rem}
+@media(max-width:600px){.dg{grid-template-columns:1fr}}
+.hid{display:none}
+</style></head><body><div class="w">
+<h1>🎯 Schiefer Wurf – Spielzeugball</h1>
+<div class="tabs" id="tabs">
+<button class="on" data-t="1">1 · Auftreffort markieren</button>
+<button data-t="2">2 · Optimaler Winkel</button>
+<button data-t="3">3 · Ziel treffen</button></div>
+
+<div class="card"><canvas id="cv" width="960" height="400"></canvas>
+<div class="msg" id="msg"></div></div>
+
+<div class="card" id="p1"><div class="ctl" id="c1"></div>
+<p class="mu">Klicke auf den Boden, um deinen Tipp für den Auftreffort zu markieren (<span style="color:var(--ac)">▼</span>), und schieße dann ab.</p>
+<div class="row"><button class="btn" id="go1">Abschuss</button><button class="btn s" id="rs1">Zurücksetzen</button>
+<label><input type="checkbox" id="dgc"> t-x- und t-y-Diagramm einblenden</label></div>
+<div class="dg hid" id="dg"><canvas id="dx" width="460" height="200"></canvas><canvas id="dy" width="460" height="200"></canvas></div></div>
+
+<div class="card hid" id="p2"><div class="ctl" id="c2"></div>
+<p class="mu">Finde den Winkel, bei dem der Ball am weitesten fliegt. Der Ball startet auf einer Erhöhung und landet auf dem Boden (Höhe 0).</p>
+<div class="row"><button class="btn" id="go2">Abschuss</button><button class="btn s" id="rs2">Tabelle leeren</button><button class="btn s" id="sol2">Lösung zeigen</button></div>
+<div class="msg mu" id="so2"></div>
+<div class="tw"><table><thead><tr><th>Nr.</th><th>Winkel</th><th>Geschw.</th><th>Höhe</th><th>Weite</th></tr></thead><tbody id="tb"></tbody></table></div></div>
+
+<div class="card hid" id="p3"><div class="ctl" id="c3"></div>
+<div class="row"><button class="btn" id="go3">Abschuss</button><button class="btn s" id="rs3">Neues Spiel</button>
+<span class="score">Punkte: <b id="pts">0</b></span><span>Versuch: <b id="att">1</b>/3</span></div>
+<p class="mu">Treffer im 1. Versuch: 3 Punkte, im 2.: 2 Punkte, im 3.: 1 Punkt. Nach einem Treffer oder 3 Versuchen wechselt das Ziel seine Position.</p></div>
+</div>
+<script>
+const g=9.81,$=id=>document.getElementById(id);
+const cv=$('cv'),cx=cv.getContext('2d'),W=cv.width,H=cv.height,GY=H-40,X0=40;
+let tab=1,s=7.5,ball=null,anim=0,guess=null,last=null,log=[],best=null,score=0,att=1,tx=60,solved=false,hitFlag=false;
+const TW=1.5;
+function mk(id,defs){const c=$(id);defs.forEach(([k,l,mn,mx,st,v,u])=>{const d=document.createElement('div');
+d.innerHTML=`<label>${l}: <b id="${id}${k}v">${v}</b> ${u}</label><input type="range" id="${id}${k}" min="${mn}" max="${mx}" step="${st}" value="${v}">`;c.appendChild(d);
+d.querySelector('input').oninput=e=>{$(id+k+'v').textContent=e.target.value;if(!ball){last=null;draw()}}});}
+const A=[['a','Abschusswinkel',0,90,1,45,'°'],['v','Abschussgeschwindigkeit',1,30,0.5,20,'m/s']];
+mk('c1',A);mk('c2',[...A,['h','Abschusshöhe',0,20,0.5,10,'m']]);mk('c3',A);
+const val=(id,k)=>+$(id+k).value;
+function params(){const id='c'+tab;return{a:val(id,'a')*Math.PI/180,v:val(id,'v'),h:tab==2?val(id,'h'):0,deg:val(id,'a')}}
+function calc(p){const vx=p.v*Math.cos(p.a),vy=p.v*Math.sin(p.a);const T=(vy+Math.sqrt(vy*vy+2*g*p.h))/g;return{vx,vy,T,R:vx*T}}
+const pos=(p,c,t)=>({x:c.vx*t,y:p.h+c.vy*t-g*t*t/2});
+const PX=x=>X0+x*s,PY=y=>GY-(y)*s;
+function draw(){
+ s=tab==2?6:7.5;
+ cx.clearRect(0,0,W,H);const css=getComputedStyle(document.documentElement),col=n=>css.getPropertyValue(n).trim();
+ const h=tab==2?val('c2','h'):0;
+ cx.fillStyle=col('--gr');cx.fillRect(0,GY,W,H-GY);
+ if(tab==2&&h>0){cx.fillStyle=col('--mu');cx.fillRect(0,PY(h),X0+6,GY-PY(h));}
+ // Skala
+ cx.fillStyle=col('--mu');cx.strokeStyle=col('--mu');cx.font='12px system-ui';cx.textAlign='center';
+ for(let x=0;x<=110;x+=10){if(PX(x)>W-5)break;cx.fillRect(PX(x),GY,1,6);cx.fillText(x+' m',PX(x),GY+20)}
+ cx.textAlign='right';for(let y=10;y<=50;y+=10){const yy=PY(y);if(yy<10)break;cx.fillRect(X0-6,yy,6,1);cx.fillText(y+' m',X0-8,yy+4)}
+ const p=params();
+ // Zielobjekt
+ if(tab==3){cx.fillStyle=hitFlag?col('--ok'):'#f59e0b';cx.fillRect(PX(tx-TW),GY-22,2*TW*s,22);cx.fillStyle='#000';cx.fillRect(PX(tx-TW)+2*TW*s/2-2,GY-30,4,8);}
+ // Tipp
+ if(tab==1&&guess!=null){cx.fillStyle=col('--ac');cx.beginPath();cx.moveTo(PX(guess),GY);cx.lineTo(PX(guess)-8,GY-16);cx.lineTo(PX(guess)+8,GY-16);cx.fill();
+  cx.textAlign='center';cx.fillText('Tipp '+guess.toFixed(1)+' m',PX(guess),GY-22)}
+ // Vorschau / Bahn
+ const c=calc(p);
+ if(last&&!ball){drawTraj(last.p,last.c,last.c.T,col('--ball'))}
+ if(ball){drawTraj(ball.p,ball.c,ball.t,col('--ball'))}
+ // Landemarke
+ if(last&&!ball){cx.fillStyle=col('--ball');cx.beginPath();cx.arc(PX(last.c.R),GY,5,0,7);cx.fill();cx.textAlign='center';cx.fillText(last.c.R.toFixed(1)+' m',PX(last.c.R),GY+34)}
+ if(tab==2&&best){cx.strokeStyle=col('--ok');cx.setLineDash([4,4]);cx.beginPath();cx.moveTo(PX(best.R),GY-60);cx.lineTo(PX(best.R),GY);cx.stroke();cx.setLineDash([]);cx.fillStyle=col('--ok');cx.textAlign='center';cx.fillText('Bestweite',PX(best.R),GY-64)}
+ // Kanone
+ const bx=X0,by=PY(p.h);cx.save();cx.translate(bx,by);cx.rotate(-p.a);cx.fillStyle=col('--tx');cx.fillRect(0,-4,26,8);cx.restore();
+ cx.fillStyle=col('--tx');cx.beginPath();cx.arc(bx,by,7,0,7);cx.fill();
+ if(ball){const q=pos(ball.p,ball.c,ball.t);cx.fillStyle=col('--ball');cx.beginPath();cx.arc(PX(q.x),PY(Math.max(q.y,0)),6,0,7);cx.fill()}
+}
+function drawTraj(p,c,tm,color){cx.strokeStyle=color;cx.lineWidth=2;cx.setLineDash([5,4]);cx.beginPath();
+ if(tm>0){for(let i=0;i<=120;i++){const t=tm*i/120,q=pos(p,c,t);i?cx.lineTo(PX(q.x),PY(q.y)):cx.moveTo(PX(q.x),PY(q.y))}}cx.stroke();cx.setLineDash([]);cx.lineWidth=1}
+function launch(){if(ball)return;const p=params(),c=calc(p);if(tab==3)hitFlag=false;ball={p,c,t:0,t0:performance.now()};$('msg').textContent='';last=null;cancelAnimationFrame(anim);tick()}
+function tick(){const t=(performance.now()-ball.t0)/1000;ball.t=Math.min(t,ball.c.T);draw();if(tab==1&&$('dgc').checked)diag(ball.t);
+ if(t<ball.c.T)anim=requestAnimationFrame(tick);else{const b=ball;ball=null;last=b;landed(b)}}
+function landed(b){const R=b.c.R;draw();if(tab==1){diag(b.c.T);
+  $('msg').innerHTML=guess==null?`Der Ball landete bei ${R.toFixed(1)} m. (Tipp nicht gesetzt.)`:`Auftreffort: ${R.toFixed(1)} m · Dein Tipp: ${guess.toFixed(1)} m · Abweichung: ${Math.abs(R-guess).toFixed(1)} m`+(Math.abs(R-guess)<2?' <span class="ok">– sehr gut!</span>':'')}
+ if(tab==2){log.push({n:log.length+1,deg:b.p.deg,v:b.p.v,h:b.p.h,R});if(!best||R>best.R)best={R,deg:b.p.deg,n:log.length};renderLog();
+  $('msg').innerHTML=`Wurfweite: ${R.toFixed(1)} m`+(best.n==log.length?' <span class="ok">– neue Bestweite!</span>':` (Bestweite: ${best.R.toFixed(1)} m bei ${best.deg}°)`);draw()}
+ if(tab==3){const hit=Math.abs(R-tx)<=TW+0.3;
+  if(hit){const pt=4-att;score+=pt;hitFlag=true;$('msg').innerHTML=`<span class="ok">Treffer! +${pt} Punkt${pt>1?'e':''}</span> – neues Ziel.`;draw();$('pts').textContent=score;setTimeout(newTarget,1300)}
+  else{const d=R-tx;$('msg').innerHTML=`<span class="bad">Daneben</span> – ${Math.abs(d).toFixed(1)} m ${d>0?'zu weit':'zu kurz'} (${R.toFixed(1)} m).`;
+   if(att>=3){$('msg').innerHTML+=' Das Ziel wechselt die Position.';setTimeout(newTarget,1500)}else{att++;$('att').textContent=att}}}}
+function newTarget(){let n;do{n=Math.round((12+Math.random()*(tab==3?72:0))*2)/2}while(Math.abs(n-tx)<10);tx=n;att=1;hitFlag=false;last=null;$('att').textContent=1;$('pts').textContent=score;$('msg').textContent='';draw()}
+function renderLog(){$('tb').innerHTML=log.map(r=>`<tr><td>${r.n}${best&&best.n==r.n?' ★':''}</td><td>${r.deg}°</td><td>${r.v} m/s</td><td>${r.h} m</td><td>${r.R.toFixed(1)} m</td></tr>`).join('')}
+// Diagramme
+function plot(id,fn,T,ymin,ymax,lab,tcur){const k=$(id),c=k.getContext('2d'),w=k.width,h=k.height,l=44,b=26;const css=getComputedStyle(document.documentElement);
+ c.clearRect(0,0,w,h);c.fillStyle=css.getPropertyValue('--mu');c.strokeStyle=css.getPropertyValue('--bd');c.font='12px system-ui';
+ c.beginPath();c.moveTo(l,8);c.lineTo(l,h-b);c.lineTo(w-8,h-b);c.stroke();
+ const X=t=>l+t/T*(w-l-12),Y=v=>h-b-(v-ymin)/(ymax-ymin||1)*(h-b-14);
+ c.textAlign='center';c.fillText('t in s',w/2,h-4);c.fillText(T.toFixed(1),X(T),h-b+14);c.fillText('0',l,h-b+14);
+ c.textAlign='right';c.fillText(ymax.toFixed(0),l-4,Y(ymax)+4);c.fillText(ymin.toFixed(0),l-4,Y(ymin)+4);c.fillText(lab,l+30,14);
+ c.strokeStyle=css.getPropertyValue('--ac');c.lineWidth=2;c.beginPath();for(let i=0;i<=100;i++){const t=T*i/100;i?c.lineTo(X(t),Y(fn(t))):c.moveTo(X(t),Y(fn(t)))}c.stroke();c.lineWidth=1;
+ c.fillStyle=css.getPropertyValue('--ball');c.beginPath();c.arc(X(tcur),Y(fn(tcur)),5,0,7);c.fill()}
+function diag(t){const b=ball||last;if(!b)return;const{p,c}=b;
+ plot('dx',t=>c.vx*t,c.T,0,Math.max(c.R,1),'x in m',t);
+ plot('dy',t=>p.h+c.vy*t-g*t*t/2,c.T,0,Math.max(p.h+c.vy*c.vy/2/g,1),'y in m',t)}
+// Events
+$('dgc').onchange=e=>{$('dg').classList.toggle('hid',!e.target.checked);if(e.target.checked){const b=ball||last;if(b)diag(b===ball?ball.t:b.c.T)}};
+cv.onclick=e=>{if(tab!=1||ball)return;const r=cv.getBoundingClientRect(),x=(e.clientX-r.left)*W/r.width;guess=Math.max(0,(x-X0)/s);draw()};
+$('go1').onclick=$('go2').onclick=$('go3').onclick=launch;
+$('rs1').onclick=()=>{guess=null;last=null;$('msg').textContent='';draw()};
+$('rs2').onclick=()=>{log=[];best=null;last=null;renderLog();$('msg').textContent='';$('so2').textContent='';draw()};
+$('rs3').onclick=()=>{score=0;newTarget()};
+$('sol2').onclick=()=>{const v=val('c2','v'),h=val('c2','h'),a=Math.atan(v/Math.sqrt(v*v+2*g*h))*180/Math.PI;
+ const R=calc({a:a*Math.PI/180,v,h}).R;$('so2').innerHTML=`Für v = ${v} m/s und h = ${h} m liegt der optimale Winkel bei ca. <b>${a.toFixed(1)}°</b> (Weite ${R.toFixed(1)} m). Formel: tan α = v / √(v² + 2·g·h). Bei h = 0 ist es genau 45°.`};
+$('tabs').onclick=e=>{const t=e.target.dataset.t;if(!t||ball)return;tab=+t;document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.t==t));
+ [1,2,3].forEach(i=>$('p'+i).classList.toggle('hid',i!=tab));last=null;$('msg').textContent='';hitFlag=false;if(tab==3&&!solved){solved=true;newTarget()}draw()};
+draw();
+</script></body></html>
